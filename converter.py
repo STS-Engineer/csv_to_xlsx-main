@@ -234,7 +234,10 @@ def safe_convert_calendar_week_to_date(cw_string):
 def process_csv(file, original_filename, customer_code, customer_name):
     encoding = detect_encoding(file)
     df = pd.read_csv(file, delimiter=';', encoding=encoding, on_bad_lines='skip')
-
+    # Convert 'DateUntil' (or any other date columns) to the required format (dd/mm/yyyy)
+    if 'DateUntil' in df.columns:
+        # Convert DateUntil to datetime if it isn't already, then format it as dd/mm/yyyy
+        df['DateUntil'] = pd.to_datetime(df['DateUntil'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y')
     # Safely handle numeric conversion for Despatch_Qty
     if 'Despatch_Qty' in df.columns:
         df['Despatch_Qty'] = pd.to_numeric(df['Despatch_Qty'], errors='coerce')
