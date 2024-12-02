@@ -265,69 +265,61 @@ def parse_pdf(file):
 
 def process_pdf(file, customer_code, customer_name):
     """
-    Parses a PDF file and processes its content into structured data.
-    Waits for specified keywords (FORECAST, Backlog, Firm) to assign Statut.
+    Parses a PDF file, extracts text, and transforms it into a structured DataFrame.
     """
-    # Step 1: Parse the PDF to extract text
+    # Parse PDF to extract text
     text = parse_pdf(file)
-
-    # Step 2: Extract materials, dates, quantities, and statuses
-    lines = text.split('\n')
-    current_material = None
-    current_statut = None  # Tracks the most recent valid keyword
     data = []
+    lines = text.split('\n')
+
+    current_material = None
+    current_statut = None
 
     for line in lines:
-        # Check for a new material
+        # Extract material number
         material_match = re.match(r"Material\s*[:\-]?\s*(\S+)", line)
         if material_match:
             current_material = material_match.group(1)
 
-        # Extract a valid Statut keyword if found in the line
+        # Match keywords to set status
         keywords = ["FORECAST", "Backlog", "Firm"]
         keyword_match = next((kw for kw in keywords if kw.lower() in line.lower()), None)
         if keyword_match:
-            # Assign numerical values for keywords
-            if keyword_match.lower() in ["forecast", "firm"]:
-                current_statut = 4
-            elif keyword_match.lower() == "backlog":
-                current_statut = 1
-        # Extract date and quantity only if a material and keyword are set
+            current_statut = 4 if keyword_match.lower() in ['forecast', 'firm'] else 1
+
+        # Extract dates and quantities
         if current_material and current_statut:
-            date_quantity_matches = extract_date_and_number(line)
+            date_quantity_matches = re.findall(r"(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2})\s+(\d+)", line)
             for date, quantity in date_quantity_matches:
                 data.append({
                     'Material_No_Customer': current_material,
-                    'Quantité': quantity,
+                    'Quantité': int(quantity),
                     'LIVRFINLU': date,
                     'Statut': current_statut
                 })
 
-    # Convert to DataFrame
+    # Validate extracted data
     if not data:
         raise ValueError("No valid data extracted from the PDF.")
 
+    # Create DataFrame
     df = pd.DataFrame(data)
-
-    # Add additional columns
     df['TIERSLU'] = customer_code
     df['Libelle client'] = customer_name.split(" C")[0]  # Extract customer name without code
-    df['Tiers livré'] = customer_code  # Customer code in 'Tiers livré'
-    df['REFEXTERNELU'] = df['Material_No_Customer']  # Placeholder for 'REFEXTERNELU'
-    df['Date debut Validité'] = "20190101"  # Placeholder for 'Date debut Validité'
+    df['Tiers livré'] = customer_code
+    df['REFEXTERNELU'] = df['Material_No_Customer']
+    df['Date debut Validité'] = "20190101"
 
-    # Reorder columns to match required structure
+    # Reorder columns
     df = df[['TIERSLU', 'Material_No_Customer', 'Quantité', 'LIVRFINLU', 'Libelle client', 'Statut', 'Tiers livré',
              'REFEXTERNELU', 'Date debut Validité']]
 
-    # Define the output file path for the CSV
-    timestamp = int(time.time())
-    output_filename = f"{customer_code}_transformed_{timestamp}.csv"
-    output_path = os.path.join(os.getcwd(), output_filename)
+    # Save transformed data to CSV
 
-    # Save the transformed DataFrame to the CSV
+    output_filename = f"{customer_code}.csv"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
     df.to_csv(output_path, index=False, sep=';')
-
     return df, output_filename
 
 def safe_convert_calendar_week_to_date(cw_string):
@@ -394,7 +386,7 @@ def process_csv(file, customer_code, customer_name):
 
     # Define the output file path
     timestamp = int(time.time())
-    output_filename = secure_filename(f"{customer_code}_transformed_{timestamp}.csv")
+    output_filename = secure_filename(f"{customer_code}.csv")
     output_path = os.path.join(OUTPUT_DIR, output_filename)
 
     # Save the transformed DataFrame to a CSV file
