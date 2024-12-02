@@ -202,6 +202,32 @@ def detect_encoding(file):
     return result['encoding']
 
 
+def extract_before_date(line):
+    """
+    Extracts specific values (FORECAST, Backlog, Firm) before a date in a line of text.
+    If none of these are found, extracts the first matching value before the date.
+    """
+    # Regex to capture any value before the date
+    pattern = r"(.*?)\s+(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2})"
+    match = re.search(pattern, line)
+
+    if match:
+        before_date = match.group(1).strip()  # Capture text before the date
+
+        # Check for specific keywords
+        keywords = ["FORECAST", "Backlog", "Firm"]
+        for keyword in keywords:
+            if keyword.lower() in before_date.lower():  # Case-insensitive check
+                return keyword
+
+        # If no keywords are found, return the first value
+        return before_date
+
+    return None  # Return None if no match found
+
+
+# Return None if no relevant value found
+
 def extract_date_and_number(text):
     # Pattern for dates in formats like MM/DD/YYYY, DD/MM/YYYY, or YYYY-MM-DD
     # Also captures the number immediately following the date.
@@ -238,36 +264,54 @@ def parse_pdf(file):
 
 
 def process_pdf(file, customer_code, customer_name):
+    """
+    Parses a PDF file and processes its content into structured data.
+    Waits for specified keywords (FORECAST, Backlog, Firm) to assign Statut.
+    """
     # Step 1: Parse the PDF to extract text
     text = parse_pdf(file)
 
-    # Step 2: Extract materials, dates, and quantities
+    # Step 2: Extract materials, dates, quantities, and statuses
     lines = text.split('\n')
     current_material = None
+    current_statut = None  # Tracks the most recent valid keyword
     data = []
+
     for line in lines:
         # Check for a new material
         material_match = re.match(r"Material\s*[:\-]?\s*(\S+)", line)
         if material_match:
             current_material = material_match.group(1)
 
-        # Extract date and quantity if material is set
-        if current_material:
+        # Extract a valid Statut keyword if found in the line
+        keywords = ["FORECAST", "Backlog", "Firm"]
+        keyword_match = next((kw for kw in keywords if kw.lower() in line.lower()), None)
+        if keyword_match:
+            # Assign numerical values for keywords
+            if keyword_match.lower() in ["forecast", "firm"]:
+                current_statut = 4
+            elif keyword_match.lower() == "backlog":
+                current_statut = 1
+        # Extract date and quantity only if a material and keyword are set
+        if current_material and current_statut:
             date_quantity_matches = extract_date_and_number(line)
             for date, quantity in date_quantity_matches:
                 data.append({
                     'Material_No_Customer': current_material,
                     'Quantité': quantity,
-                    'LIVRFINLU': date
+                    'LIVRFINLU': date,
+                    'Statut': current_statut
                 })
 
     # Convert to DataFrame
+    if not data:
+        raise ValueError("No valid data extracted from the PDF.")
+
     df = pd.DataFrame(data)
 
     # Add additional columns
     df['TIERSLU'] = customer_code
     df['Libelle client'] = customer_name.split(" C")[0]  # Extract customer name without code
-    df['Statut'] = 'N/A'  # Placeholder for 'Statut'
     df['Tiers livré'] = customer_code  # Customer code in 'Tiers livré'
     df['REFEXTERNELU'] = df['Material_No_Customer']  # Placeholder for 'REFEXTERNELU'
     df['Date debut Validité'] = "20190101"  # Placeholder for 'Date debut Validité'
@@ -279,13 +323,12 @@ def process_pdf(file, customer_code, customer_name):
     # Define the output file path for the CSV
     timestamp = int(time.time())
     output_filename = f"{customer_code}_transformed_{timestamp}.csv"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    output_path = os.path.join(os.getcwd(), output_filename)
 
     # Save the transformed DataFrame to the CSV
     df.to_csv(output_path, index=False, sep=';')
 
     return df, output_filename
-
 
 def safe_convert_calendar_week_to_date(cw_string):
     """
