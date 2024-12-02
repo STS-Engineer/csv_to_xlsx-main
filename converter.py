@@ -5,6 +5,9 @@ import chardet
 import time
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
+from PyPDF2 import PdfReader
+import re
+
 app = Flask(__name__)
 
 # Directory for output files
@@ -12,9 +15,9 @@ OUTPUT_DIR = "outputs"
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
-ALLOWED_EXTENSIONS = {'csv'}
+ALLOWED_EXTENSIONS = {'csv', 'pdf'}
 
-# HTML Template
+# HTML Template for Upload Form
 UPLOAD_FORM_HTML = """<!doctype html>
 <html lang="en">
   <head>
@@ -32,7 +35,7 @@ UPLOAD_FORM_HTML = """<!doctype html>
         align-items: center;
         height: 100vh;
       }
-          .container {
+      .container {
         background-color: #ffffff;
         padding: 30px;
         border-radius: 10px;
@@ -42,7 +45,6 @@ UPLOAD_FORM_HTML = """<!doctype html>
         overflow: auto;
         max-height: 90vh;
       }
-
       h1 {
         color: #333;
         font-size: 24px;
@@ -115,28 +117,27 @@ UPLOAD_FORM_HTML = """<!doctype html>
         color: #888;
         font-size: 14px;
       }
-        img {
+      img {
         max-width: 300px;
         margin-bottom: 20px;
       }
       select.select-btn {
-  appearance: none;
-  background-color: #007bff;
-  color: white;
-  font-size: 16px;
-  padding: 12px;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  text-align: center;
-  width: 100%;
-  max-width: 400px;
-  margin: 10px auto;
-}
-
-select.select-btn:hover {
-  background-color: #0056b3;
-}
+        appearance: none;
+        background-color: #007bff;
+        color: white;
+        font-size: 16px;
+        padding: 12px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        text-align: center;
+        width: 100%;
+        max-width: 400px;
+        margin: 10px auto;
+      }
+      select.select-btn:hover {
+        background-color: #0056b3;
+      }
     </style>
     <script>
       function updateCustomerCode() {
@@ -152,28 +153,27 @@ select.select-btn:hover {
     <div class="container">
     <img src="/static/logo-avocarbon (1).png" alt="Logo">
       <h1>CSV Transformation Tool</h1>
-      <p>Upload your CSV file and enter the customer code to transform your data.</p>
-<form action="/convert" method="post" enctype="multipart/form-data">
-  <input type="file" name="file" accept=".csv" required>
-  <select name="customer_name" class="btn select-btn" id="customer_name" onchange="updateCustomerCode()" required>
-    <option value="" disabled selected>Select Customer Name</option>
-    <option value="INTEVA PRODUCTS, LLC C00241" data-code="C00241">INTEVA PRODUCTS, LLC C00241</option>
-    <option value="Inteva Esson C00410" data-code="C00410">Inteva Esson C00410</option>
-    <option value="VALEO NEVERS C00409" data-code="C00409">VALEO NEVERS C00409</option>
-    <option value="VALEO ILUMINACION S.A.U C00125" data-code="C00125">VALEO ILUMINACION S.A.U C00125</option>
-    <option value="VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072" data-code="C00072">VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072</option>
-    <option value="NIDEC SPAIN MOTORS AND ACTUATORS C00050" data-code="C00050">NIDEC SPAIN MOTORS AND ACTUATORS C00050</option>
-    <option value="NIDEC SPAIN MOTORS AND ACTUATORS - New C00050-1" data-code="C00050-1">NIDEC SPAIN MOTORS AND ACTUATORS - New C00050-1</option>
-    <option value="VALEO NORTH AMERICA INC.(WIPERS) C00303" data-code="C00303">VALEO NORTH AMERICA INC.(WIPERS) C00303</option>
-    <option value="VALEO AUTOSYSTEMY SP Z.O.O C00250" data-code="C00250">VALEO AUTOSYSTEMY SP Z.O.O C00250</option>
-    <option value="NIDEC MOTORS & ACTUATORS (GERMANY) GmbH C00113" data-code="C00113">NIDEC MOTORS & ACTUATORS (GERMANY) GmbH C00113</option>
-    <option value="VALEO SHARED SERVICE CENTER C00132" data-code="C00132">VALEO SHARED SERVICE CENTER C00132</option>
-    <option value="NIDEC MOTORS & ACTUATORS (POLAND)Sp C00126" data-code="C00126">NIDEC MOTORS & ACTUATORS (POLAND)Sp C00126</option>
-  </select>
-
-  <input type="text" name="customer_code" id="customer_code" placeholder="Customer Code" readonly required>
-  <input type="submit" value="Transform">
-</form>
+      <p>Upload your CSV file or PDF file and enter the customer code to transform your data.</p>
+      <form action="/convert" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".csv,.pdf" required>
+        <select name="customer_name" class="btn select-btn" id="customer_name" onchange="updateCustomerCode()" required>
+          <option value="" disabled selected>Select Customer Name</option>
+          <option value="INTEVA PRODUCTS, LLC C00241" data-code="C00241">INTEVA PRODUCTS, LLC C00241</option>
+          <option value="Inteva Esson C00410" data-code="C00410">Inteva Esson C00410</option>
+          <option value="VALEO NEVERS C00409" data-code="C00409">VALEO NEVERS C00409</option>
+          <option value="VALEO ILUMINACION S.A.U C00125" data-code="C00125">VALEO ILUMINACION S.A.U C00125</option>
+          <option value="VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072" data-code="C00072">VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072</option>
+          <option value="NIDEC SPAIN MOTORS AND ACTUATORS C00050" data-code="C00050">NIDEC SPAIN MOTORS AND ACTUATORS C00050</option>
+          <option value="NIDEC SPAIN MOTORS AND ACTUATORS - New C00050-1" data-code="C00050-1">NIDEC SPAIN MOTORS AND ACTUATORS - New C00050-1</option>
+          <option value="VALEO NORTH AMERICA INC.(WIPERS) C00303" data-code="C00303">VALEO NORTH AMERICA INC.(WIPERS) C00303</option>
+          <option value="VALEO AUTOSYSTEMY SP Z.O.O C00250" data-code="C00250">VALEO AUTOSYSTEMY SP Z.O.O C00250</option>
+          <option value="NIDEC MOTORS & ACTUATORS (GERMANY) GmbH C00113" data-code="C00113">NIDEC MOTORS & ACTUATORS (GERMANY) GmbH C00113</option>
+          <option value="VALEO SHARED SERVICE CENTER C00132" data-code="C00132">VALEO SHARED SERVICE CENTER C00132</option>
+          <option value="NIDEC MOTORS & ACTUATORS (POLAND)Sp C00126" data-code="C00126">NIDEC MOTORS & ACTUATORS (POLAND)Sp C00126</option>
+        </select>
+        <input type="text" name="customer_code" id="customer_code" placeholder="Customer Code" readonly required>
+        <input type="submit" value="Transform">
+      </form>
       {% if summary_table %}
       <div class="scrollable">
         <h2>Transformed Data Preview</h2>
@@ -194,17 +194,97 @@ select.select-btn:hover {
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
 def detect_encoding(file):
     raw_data = file.read()
     result = chardet.detect(raw_data)
     file.seek(0)
     return result['encoding']
 
-def get_first_available_column(df, columns):
-    for col in columns:
-        if col in df.columns:
-            return df[col]
-    return None  # Return None if no column matches
+
+def extract_date_and_number(text):
+    # Pattern for dates in formats like MM/DD/YYYY, DD/MM/YYYY, or YYYY-MM-DD
+    # Also captures the number immediately following the date.
+    date_number_pattern = r"(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2})\s+(\d+(?:,\d{3})*)"
+
+    # Find all occurrences of dates followed by numbers
+    matches = re.findall(date_number_pattern, text)
+
+    # Clean up numbers (remove commas and convert to integer)
+    cleaned_matches = [(date, int(number.replace(",", ""))) for date, number in matches]
+
+    return cleaned_matches
+
+
+def parse_pdf(file):
+    # Save the uploaded PDF to a temporary file
+    temp_filename = secure_filename(file.filename)
+    temp_filepath = os.path.join(OUTPUT_DIR, temp_filename)
+
+    # Save the file temporarily
+    file.save(temp_filepath)
+
+    # Parse the PDF using PyPDF2
+    with open(temp_filepath, 'rb') as pdf_file:
+        reader = PdfReader(pdf_file)
+        text = ''
+        for page in reader.pages:
+            text += page.extract_text() + '\n'
+
+    # Remove temporary file after parsing
+    os.remove(temp_filepath)
+
+    return text
+
+
+def process_pdf(file, customer_code, customer_name):
+    # Step 1: Parse the PDF to extract text
+    text = parse_pdf(file)
+
+    # Step 2: Extract materials, dates, and quantities
+    lines = text.split('\n')
+    current_material = None
+    data = []
+    for line in lines:
+        # Check for a new material
+        material_match = re.match(r"Material\s*[:\-]?\s*(\S+)", line)
+        if material_match:
+            current_material = material_match.group(1)
+
+        # Extract date and quantity if material is set
+        if current_material:
+            date_quantity_matches = extract_date_and_number(line)
+            for date, quantity in date_quantity_matches:
+                data.append({
+                    'Material_No_Customer': current_material,
+                    'Quantité': quantity,
+                    'LIVRFINLU': date
+                })
+
+    # Convert to DataFrame
+    df = pd.DataFrame(data)
+
+    # Add additional columns
+    df['TIERSLU'] = customer_code
+    df['Libelle client'] = customer_name.split(" C")[0]  # Extract customer name without code
+    df['Statut'] = 'N/A'  # Placeholder for 'Statut'
+    df['Tiers livré'] = customer_code  # Customer code in 'Tiers livré'
+    df['REFEXTERNELU'] = df['Material_No_Customer']  # Placeholder for 'REFEXTERNELU'
+    df['Date debut Validité'] = "20190101"  # Placeholder for 'Date debut Validité'
+
+    # Reorder columns to match required structure
+    df = df[['TIERSLU', 'Material_No_Customer', 'Quantité', 'LIVRFINLU', 'Libelle client', 'Statut', 'Tiers livré',
+             'REFEXTERNELU', 'Date debut Validité']]
+
+    # Define the output file path for the CSV
+    timestamp = int(time.time())
+    output_filename = f"{customer_code}_transformed_{timestamp}.csv"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+    # Save the transformed DataFrame to the CSV
+    df.to_csv(output_path, index=False, sep=';')
+
+    return df, output_filename
 
 
 def safe_convert_calendar_week_to_date(cw_string):
@@ -228,39 +308,41 @@ def safe_convert_calendar_week_to_date(cw_string):
         print(f"Error converting CW to date: {e}, input was: {cw_string}")
         return cw_string
 
-# Apply the updated function to the Delivery_Date column
 
+def get_first_available_column(df, columns):
+    for col in columns:
+        if col in df.columns:
+            return df[col]
+    return None  # Return None if no column matches
 
-def process_csv(file, original_filename, customer_code, customer_name):
+def process_csv(file, customer_code, customer_name):
     encoding = detect_encoding(file)
     df = pd.read_csv(file, delimiter=';', encoding=encoding, on_bad_lines='skip')
-    # Convert 'DateUntil' (or any other date columns) to the required format (dd/mm/yyyy)
+
+    # Transform the DataFrame (date formatting, numerical conversions, etc.)
     if 'DateUntil' in df.columns:
-        # Convert DateUntil to datetime if it isn't already, then format it as dd/mm/yyyy
         df['DateUntil'] = pd.to_datetime(df['DateUntil'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y')
-    # Safely handle numeric conversion for Despatch_Qty
     if 'Despatch_Qty' in df.columns:
         df['Despatch_Qty'] = pd.to_numeric(df['Despatch_Qty'], errors='coerce')
-
-    # Safely handle date conversion for Delivery_Date column
     if 'Delivery_Date' in df.columns:
         df['Delivery_Date'] = df['Delivery_Date'].apply(
-            lambda x: safe_convert_calendar_week_to_date(x) if isinstance(x, str) and x.startswith('CW') else x
+            lambda x: safe_convert_calendar_week_to_date(x) if isinstance(x, str) and x.startswith('CW') else x)
+    if 'Material' in df.columns:
+        df['Material'] = df['Material'].astype(str).apply(
+            lambda x: 'V' + x.replace('-', '.')[0:7]
         )
-
-    # Safely handle date conversion for Last_Delivery_Note_Date column
-    if 'Last_Delivery_Note_Date' in df.columns and not df['Last_Delivery_Note_Date'].isnull().all():
-        df['Last_Delivery_Note_Date'] = pd.to_datetime(
-            df['Last_Delivery_Note_Date'], errors='coerce', dayfirst=True
-        ).dt.strftime('%d/%m/%Y')
-
+    if 'Status' in df.columns or 'Release_Status' in df.columns:
+        status_column = 'Status' if 'Status' in df.columns else 'Release_Status'
+        df[status_column] = df[status_column].apply(
+            lambda x: 4 if str(x).lower() in ['firm', 'forecast'] else (1 if str(x).lower() == 'backlog' else x)
+        )
     # Transform the DataFrame
     transformed_df = pd.DataFrame({
         'TIERSLU': customer_code,
-        'Ref': get_first_available_column(df, ['Material_No_Customer', 'Material']),
+        'Material_No_Customer': get_first_available_column(df, ['Material_No_Customer', 'Material']),
         'Quantité': get_first_available_column(df, ['Despatch_Qty', 'DespatchQty']),
         'LIVRFINLU': get_first_available_column(df, ['Delivery_Date', 'DateUntil']),
-        'Libelle client': customer_name.split(" C")[0]  ,  # Assign the selected customer name here
+        'Libelle client': customer_name.split(" C")[0],
         'Statut': get_first_available_column(df, ['Release_Status', 'Status']),
         'Tiers livré': customer_code,
         'REFEXTERNELU': get_first_available_column(df, ['Purchase_Order_No', 'PONumber']),
@@ -277,41 +359,57 @@ def process_csv(file, original_filename, customer_code, customer_name):
 
     return transformed_df, output_filename
 
+
 @app.route('/')
 def index():
     return render_template_string(UPLOAD_FORM_HTML, summary_table=None, show_download=False)
 
-@app.route('/convert', methods=['POST'])
+
 @app.route('/convert', methods=['POST'])
 def convert():
     if 'file' not in request.files or 'customer_code' not in request.form or 'customer_name' not in request.form:
         return "Missing file, customer code, or customer name", 400
 
+    # Get the uploaded file and customer details
     file = request.files['file']
     customer_code = request.form['customer_code']
-    customer_name = request.form['customer_name']  # Retrieve customer name from form
+    customer_name = request.form['customer_name']  # Get the customer name from the form
 
-    if not file.filename or not allowed_file(file.filename):
-        return "Invalid file type. Please upload a CSV file.", 400
+    if not file.filename:
+        return "No file selected", 400
 
     try:
-        transformed_data, transformed_filename = process_csv(file, file.filename, customer_code, customer_name)
+        # Determine file type and process accordingly
+        if file.filename.lower().endswith('.pdf'):
+            transformed_data, output_filename = process_pdf(file, customer_code, customer_name)
+        elif file.filename.lower().endswith('.csv'):
+            transformed_data, output_filename = process_csv(file, customer_code, customer_name)
+        else:
+            return "Invalid file type. Please upload a CSV or PDF file.", 400
+
+        # Display the first 20 rows of the transformed data as HTML
         transformed_table_html = transformed_data.head(20).to_html(classes='table', index=False)
+
+        # Return the transformed data and a download link for the CSV
         return render_template_string(
             UPLOAD_FORM_HTML,
             summary_table=transformed_table_html,
             show_download=True,
-            download_path=transformed_filename
+            download_path=output_filename
         )
     except Exception as e:
         return f"Error processing the file: {e}", 500
 
-@app.route('/download/<path:filename>')
+
+# Function to handle file download (if the user clicks the download button)
+@app.route('/download/<filename>')
 def download(filename):
     file_path = os.path.join(OUTPUT_DIR, filename)
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
     return "File not found", 404
 
+
+# Run the Flask app
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
