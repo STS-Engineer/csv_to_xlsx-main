@@ -262,11 +262,20 @@ def parse_pdf(file):
 
     return text
 
-
-def process_pdf(file, customer_code, customer_name):
+material_ref_map = {
+        '53343086': '100',
+        '1001MR035': '200',
+        'W000037335': '300',
+        'W000035923':'500',
+        # Add more mappings as needed
+    }
+def process_pdf(file, customer_code, customer_name, material_ref_map):
     """
     Parses a PDF file, extracts text, and transforms it into a structured DataFrame.
+    If a material number matches a value in the material_ref_map, the corresponding
+    REFEXTERNELU value is assigned.
     """
+
     # Parse PDF to extract text
     text = parse_pdf(file)
     data = []
@@ -295,7 +304,8 @@ def process_pdf(file, customer_code, customer_name):
                     'Material_No_Customer': current_material,
                     'Quantité': int(quantity),
                     'LIVRFINLU': date,
-                    'Statut': current_statut
+                    'Statut': current_statut,
+                    'REFEXTERNELU': material_ref_map.get(current_material, current_material)  # Default to material number if no match
                 })
 
     # Validate extracted data
@@ -307,7 +317,6 @@ def process_pdf(file, customer_code, customer_name):
     df['TIERSLU'] = customer_code
     df['Libelle client'] = customer_name.split(" C")[0]  # Extract customer name without code
     df['Tiers livré'] = customer_code
-    df['REFEXTERNELU'] = df['Material_No_Customer']
     df['Date debut Validité'] = "20190101"
 
     # Reorder columns
@@ -315,7 +324,6 @@ def process_pdf(file, customer_code, customer_name):
              'REFEXTERNELU', 'Date debut Validité']]
 
     # Save transformed data to CSV
-
     output_filename = f"{customer_code}.csv"
     output_path = os.path.join(OUTPUT_DIR, output_filename)
 
@@ -354,6 +362,15 @@ def process_csv(file, customer_code, customer_name):
     encoding = detect_encoding(file)
     df = pd.read_csv(file, delimiter=';', encoding=encoding, on_bad_lines='skip')
 
+    # Remove rows where specific column values match their corresponding headers
+    if all(col in df.columns for col in ['Material_No_Customer', 'Delivery_Date', 'Release_Status', 'Purchase_Order_No']):
+        df = df[~(
+            (df['Material_No_Customer'] == 'Material_No_Customer') &
+            (df['Delivery_Date'] == 'Delivery_Date') &
+            (df['Release_Status'] == 'Release_Status') &
+            (df['Purchase_Order_No'] == 'Purchase_Order_No')
+        )]
+
     # Transform the DataFrame (date formatting, numerical conversions, etc.)
     if 'DateUntil' in df.columns:
         df['DateUntil'] = pd.to_datetime(df['DateUntil'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y')
@@ -371,6 +388,7 @@ def process_csv(file, customer_code, customer_name):
         df[status_column] = df[status_column].apply(
             lambda x: 4 if str(x).lower() in ['firm', 'forecast'] else (1 if str(x).lower() == 'backlog' else x)
         )
+
     # Transform the DataFrame
     transformed_df = pd.DataFrame({
         'TIERSLU': customer_code,
@@ -383,6 +401,12 @@ def process_csv(file, customer_code, customer_name):
         'REFEXTERNELU': get_first_available_column(df, ['Purchase_Order_No', 'PONumber']),
         'Date debut Validité': "20190101",
     })
+
+    # Remove '.0' from 'Quantité' column
+    if 'Quantité' in transformed_df.columns:
+        transformed_df['Quantité'] = transformed_df['Quantité'].apply(
+            lambda x: str(int(x)) if pd.notnull(x) and float(x).is_integer() else x
+        )
 
     # Define the output file path
     timestamp = int(time.time())
@@ -416,7 +440,7 @@ def convert():
     try:
         # Determine file type and process accordingly
         if file.filename.lower().endswith('.pdf'):
-            transformed_data, output_filename = process_pdf(file, customer_code, customer_name)
+            transformed_data, output_filename = process_pdf(file, customer_code, customer_name, material_ref_map)
         elif file.filename.lower().endswith('.csv'):
             transformed_data, output_filename = process_csv(file, customer_code, customer_name)
         else:
