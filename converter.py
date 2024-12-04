@@ -7,7 +7,8 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from PyPDF2 import PdfReader
 import re
-
+import logging
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # Directory for output files
@@ -263,26 +264,45 @@ def parse_pdf(file):
     return text
 
 material_ref_map = {
-        '53343086': '100',
-        '1001MR035': '200',
-        'W000037335': '300',
-        'W000035923':'500',
-        # Add more mappings as needed
-    }
-def process_pdf(file, customer_code, customer_name, material_ref_map):
+  "53343086": "5503001138",
+  "1001MR035": "5503001140",
+  "W000024158": "5503001143",
+  "W000037335": "5503001144",
+  "W000035923": "5503002299",
+  "53342696": "5503003594",
+  "W000058808": "5503003595",
+  "W000037397": "5503003675",
+  "W000038990": "5503003722",
+  "W151616": "5503003740",
+  "W447251": "5503003895"
+}
+
+
+def process_pdf(file, customer_code, customer_name, material_ref_map, output_dir=None):
     """
     Parses a PDF file, extracts text, and transforms it into a structured DataFrame.
     If a material number matches a value in the material_ref_map, the corresponding
     REFEXTERNELU value is assigned.
-    """
 
-    # Parse PDF to extract text
-    text = parse_pdf(file)
+    :param output_dir: Directory where the CSV file will be saved (default is current directory).
+    """
+    # If output_dir is not provided, default to the current working directory
+    if output_dir is None:
+        output_dir = os.getcwd()
+
+    try:
+        # Parse PDF to extract text
+        text = parse_pdf(file)
+    except Exception as e:
+        raise ValueError(f"Failed to parse PDF file: {e}")
+
     data = []
     lines = text.split('\n')
 
     current_material = None
     current_statut = None
+    keywords_pattern = re.compile(r"(forecast|backlog|firm)", re.IGNORECASE)
+    one_week_ago = datetime.now() - timedelta(days=7)
 
     for line in lines:
         # Extract material number
@@ -290,22 +310,46 @@ def process_pdf(file, customer_code, customer_name, material_ref_map):
         if material_match:
             current_material = material_match.group(1)
 
-        # Match keywords to set status
-        keywords = ["FORECAST", "Backlog", "Firm"]
-        keyword_match = next((kw for kw in keywords if kw.lower() in line.lower()), None)
+        # Match keywords to set initial status
+        keyword_match = keywords_pattern.search(line)
         if keyword_match:
-            current_statut = 4 if keyword_match.lower() in ['forecast', 'firm'] else 1
+            current_statut = 4 if keyword_match.group(0).lower() in ['forecast', 'firm'] else 1
 
         # Extract dates and quantities
-        if current_material and current_statut:
-            date_quantity_matches = re.findall(r"(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2})\s+(\d+)", line)
+        if current_material:
+            date_quantity_matches = re.findall(r"(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2})\s+([\d,]+)",
+                                               line.strip())
             for date, quantity in date_quantity_matches:
+                try:
+                    # Try parsing the date in both formats
+                    date_obj = datetime.strptime(date, "%d/%m/%Y" if '/' in date else "%d-%m-%Y")
+                except ValueError:
+                    try:
+                        # If the first format fails, try mm/dd/yyyy
+                        date_obj = datetime.strptime(date, "%m/%d/%Y")
+                    except ValueError:
+                        logging.warning(f"Skipping invalid date format: {date}")
+                        continue
+
+                # Format the date as dd/mm/yyyy
+                formatted_date = date_obj.strftime("%d/%m/%Y")
+
+                # Remove commas from the quantity
+                cleaned_quantity = int(quantity.replace(',', ''))
+
+                # Check if the date is older than a week
+                if date_obj < one_week_ago:
+                    statut = 1  # Set Statut to 1 if the date is more than a week old
+                else:
+                    statut = current_statut
+
                 data.append({
                     'Material_No_Customer': current_material,
-                    'Quantité': int(quantity),
-                    'LIVRFINLU': date,
-                    'Statut': current_statut,
-                    'REFEXTERNELU': material_ref_map.get(current_material, current_material)  # Default to material number if no match
+                    'Quantité': cleaned_quantity,
+                    'LIVRFINLU': formatted_date,
+                    'Statut': statut,
+                    'REFEXTERNELU': material_ref_map.get(current_material, current_material)
+                    # Default to material number if no match
                 })
 
     # Validate extracted data
@@ -325,11 +369,11 @@ def process_pdf(file, customer_code, customer_name, material_ref_map):
 
     # Save transformed data to CSV
     output_filename = f"{customer_code}.csv"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    output_path = os.path.join(output_dir, output_filename)
 
     df.to_csv(output_path, index=False, sep=';')
+    logging.info(f"Data saved to {output_path}")
     return df, output_filename
-
 def safe_convert_calendar_week_to_date(cw_string):
     """
     Converts a calendar week string (e.g., 'CW 07/2025') to a date string in the format 'D/M/Y'.
@@ -358,6 +402,23 @@ def get_first_available_column(df, columns):
             return df[col]
     return None  # Return None if no column matches
 
+
+def is_old_week(date_str):
+    try:
+        date_obj = pd.to_datetime(date_str, format='%d/%m/%Y', errors='coerce')
+        if pd.isna(date_obj):
+            return False
+
+        # Get current week number and the week number of the date
+        current_week = datetime.datetime.now().isocalendar()[1]
+        date_week = date_obj.isocalendar()[1]
+        return date_week < current_week
+    except Exception as e:
+        return False  # Assume it's not an old week if any error occurs
+
+
+
+
 def process_csv(file, customer_code, customer_name):
     encoding = detect_encoding(file)
     df = pd.read_csv(file, delimiter=';', encoding=encoding, on_bad_lines='skip')
@@ -371,11 +432,12 @@ def process_csv(file, customer_code, customer_name):
             (df['Purchase_Order_No'] == 'Purchase_Order_No')
         )]
 
-    # Transform the DataFrame (date formatting, numerical conversions, etc.)
+    # Transform the DataFrame (date formatting, etc.)
     if 'DateUntil' in df.columns:
         df['DateUntil'] = pd.to_datetime(df['DateUntil'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y')
     if 'Despatch_Qty' in df.columns:
-        df['Despatch_Qty'] = pd.to_numeric(df['Despatch_Qty'], errors='coerce')
+        # Skip conversion, keep the values as they are (string format or whatever they are in CSV)
+        pass
     if 'Delivery_Date' in df.columns:
         df['Delivery_Date'] = df['Delivery_Date'].apply(
             lambda x: safe_convert_calendar_week_to_date(x) if isinstance(x, str) and x.startswith('CW') else x)
@@ -389,7 +451,14 @@ def process_csv(file, customer_code, customer_name):
             lambda x: 4 if str(x).lower() in ['firm', 'forecast'] else (1 if str(x).lower() == 'backlog' else x)
         )
 
-    # Transform the DataFrame
+    # Add condition to set Statut based on LIVRFINLU being an old week
+    if 'LIVRFINLU' in df.columns:
+        df['Statut'] = df.apply(
+            lambda row: 1 if is_old_week(row['LIVRFINLU']) else 4,  # Set 1 for old week, 4 for not old week
+            axis=1
+        )
+
+    # Create the transformed DataFrame
     transformed_df = pd.DataFrame({
         'TIERSLU': customer_code,
         'Material_No_Customer': get_first_available_column(df, ['Material_No_Customer', 'Material']),
@@ -402,10 +471,12 @@ def process_csv(file, customer_code, customer_name):
         'Date debut Validité': "20190101",
     })
 
-    # Remove '.0' from 'Quantité' column
+    # Remove '.0' from 'Quantité' column if it exists (for display purposes)
     if 'Quantité' in transformed_df.columns:
         transformed_df['Quantité'] = transformed_df['Quantité'].apply(
-            lambda x: str(int(x)) if pd.notnull(x) and float(x).is_integer() else x
+            lambda x: str(int(float(x.replace('.', '').replace(',', '.')))) if pd.notnull(x) and isinstance(x,
+                                                                                                            str) and x.replace(
+                '.', '', 1).replace(',', '', 1).isdigit() else x
         )
 
     # Define the output file path
