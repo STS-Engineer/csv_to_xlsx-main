@@ -495,7 +495,7 @@ def process_csv(file, customer_code, customer_name):
                 else (1 if str(x).lower() == 'backlog' else x)
             )
 
-    # Create the transformed DataFrame
+
     num_rows = len(df)
     transformed_df = pd.DataFrame({
         'TIERSLU': [customer_code] * num_rows,
