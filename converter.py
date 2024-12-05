@@ -7,7 +7,8 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from PyPDF2 import PdfReader
 import re
-
+import logging
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # Directory for output files
@@ -263,26 +264,45 @@ def parse_pdf(file):
     return text
 
 material_ref_map = {
-        '53343086': '100',
-        '1001MR035': '200',
-        'W000037335': '300',
-        'W000035923':'500',
-        # Add more mappings as needed
-    }
-def process_pdf(file, customer_code, customer_name, material_ref_map):
+  "53343086": "5503001138",
+  "1001MR035": "5503001140",
+  "W000024158": "5503001143",
+  "W000037335": "5503001144",
+  "W000035923": "5503002299",
+  "53342696": "5503003594",
+  "W000058808": "5503003595",
+  "W000037397": "5503003675",
+  "W000038990": "5503003722",
+  "W151616": "5503003740",
+  "W447251": "5503003895"
+}
+
+
+def process_pdf(file, customer_code, customer_name, material_ref_map, output_dir=None):
     """
     Parses a PDF file, extracts text, and transforms it into a structured DataFrame.
     If a material number matches a value in the material_ref_map, the corresponding
     REFEXTERNELU value is assigned.
-    """
 
-    # Parse PDF to extract text
-    text = parse_pdf(file)
+    :param output_dir: Directory where the CSV file will be saved (default is current directory).
+    """
+    # If output_dir is not provided, default to the current working directory
+    if output_dir is None:
+        output_dir = os.getcwd()
+
+    try:
+        # Parse PDF to extract text
+        text = parse_pdf(file)
+    except Exception as e:
+        raise ValueError(f"Failed to parse PDF file: {e}")
+
     data = []
     lines = text.split('\n')
 
     current_material = None
     current_statut = None
+    keywords_pattern = re.compile(r"(forecast|backlog|firm)", re.IGNORECASE)
+    one_week_ago = datetime.now() - timedelta(days=7)
 
     for line in lines:
         # Extract material number
@@ -290,22 +310,46 @@ def process_pdf(file, customer_code, customer_name, material_ref_map):
         if material_match:
             current_material = material_match.group(1)
 
-        # Match keywords to set status
-        keywords = ["FORECAST", "Backlog", "Firm"]
-        keyword_match = next((kw for kw in keywords if kw.lower() in line.lower()), None)
+        # Match keywords to set initial status
+        keyword_match = keywords_pattern.search(line)
         if keyword_match:
-            current_statut = 4 if keyword_match.lower() in ['forecast', 'firm'] else 1
+            current_statut = 4 if keyword_match.group(0).lower() in ['forecast', 'firm'] else 1
 
         # Extract dates and quantities
-        if current_material and current_statut:
-            date_quantity_matches = re.findall(r"(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2})\s+(\d+)", line)
+        if current_material:
+            date_quantity_matches = re.findall(r"(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2})\s+([\d,]+)",
+                                               line.strip())
             for date, quantity in date_quantity_matches:
+                try:
+                    # Try parsing the date in both formats
+                    date_obj = datetime.strptime(date, "%d/%m/%Y" if '/' in date else "%d-%m-%Y")
+                except ValueError:
+                    try:
+                        # If the first format fails, try mm/dd/yyyy
+                        date_obj = datetime.strptime(date, "%m/%d/%Y")
+                    except ValueError:
+                        logging.warning(f"Skipping invalid date format: {date}")
+                        continue
+
+                # Format the date as dd/mm/yyyy
+                formatted_date = date_obj.strftime("%d/%m/%Y")
+
+                # Remove commas from the quantity
+                cleaned_quantity = int(quantity.replace(',', ''))
+
+                # Check if the date is older than a week
+                if date_obj < one_week_ago:
+                    statut = 1  # Set Statut to 1 if the date is more than a week old
+                else:
+                    statut = current_statut
+
                 data.append({
                     'Material_No_Customer': current_material,
-                    'Quantité': int(quantity),
-                    'LIVRFINLU': date,
-                    'Statut': current_statut,
-                    'REFEXTERNELU': material_ref_map.get(current_material, current_material)  # Default to material number if no match
+                    'Quantité': cleaned_quantity,
+                    'LIVRFINLU': formatted_date,
+                    'Statut': statut,
+                    'REFEXTERNELU': material_ref_map.get(current_material, current_material)
+                    # Default to material number if no match
                 })
 
     # Validate extracted data
@@ -325,11 +369,11 @@ def process_pdf(file, customer_code, customer_name, material_ref_map):
 
     # Save transformed data to CSV
     output_filename = f"{customer_code}.csv"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    output_path = os.path.join(output_dir, output_filename)
 
     df.to_csv(output_path, index=False, sep=';')
+    logging.info(f"Data saved to {output_path}")
     return df, output_filename
-
 def safe_convert_calendar_week_to_date(cw_string):
     """
     Converts a calendar week string (e.g., 'CW 07/2025') to a date string in the format 'D/M/Y'.
@@ -358,54 +402,120 @@ def get_first_available_column(df, columns):
             return df[col]
     return None  # Return None if no column matches
 
+def get_start_of_previous_week():
+    today = datetime.now()
+    # Get the current weekday (0=Monday, 6=Sunday)
+    days_since_monday = today.weekday()  # Monday is 0, Sunday is 6
+    # Get the previous week's Monday
+    start_of_previous_week = today - timedelta(days=days_since_monday + 7)
+    # Set the time to 00:00:00 for a clean comparison
+    return start_of_previous_week.replace(hour=0, minute=0, second=0, microsecond=0)
+def is_in_previous_week(date_str):
+    try:
+        # Convert to datetime object
+        date = pd.to_datetime(date_str, errors='coerce')
+        # Get the start of the previous week (Monday)
+        start_of_previous_week = get_start_of_previous_week()
+        # Calculate the end of the previous week (Sunday)
+        end_of_previous_week = start_of_previous_week + timedelta(days=6)
+
+        # Check if the date is within the previous week
+        if date and start_of_previous_week <= date <= end_of_previous_week:
+            return True
+        return False
+    except Exception as e:
+        print(f"Error checking if date is in previous week: {date_str} -> {e}")
+        return False # Assume it's not an old week if any error occurs
+
+
 def process_csv(file, customer_code, customer_name):
     encoding = detect_encoding(file)
+
+    # Read the file normally
     df = pd.read_csv(file, delimiter=';', encoding=encoding, on_bad_lines='skip')
 
-    # Remove rows where specific column values match their corresponding headers
-    if all(col in df.columns for col in ['Material_No_Customer', 'Delivery_Date', 'Release_Status', 'Purchase_Order_No']):
-        df = df[~(
-            (df['Material_No_Customer'] == 'Material_No_Customer') &
-            (df['Delivery_Date'] == 'Delivery_Date') &
-            (df['Release_Status'] == 'Release_Status') &
-            (df['Purchase_Order_No'] == 'Purchase_Order_No')
-        )]
+    # Check if the first column has any data (not all NaN or empty)
+    if not df.iloc[:, 0].isnull().all():  # Check if the first column is not empty
+        # If the first column is populated, split it by commas
+        first_column = df.iloc[:, 0].astype(str)  # Ensure the column is treated as strings
+        split_data = first_column.str.split(',', expand=True)
+        split_data = split_data.applymap(lambda x: str(x).replace('"', '') if pd.notnull(x) else x)
+        # Add the new split columns to the DataFrame
+        for i, col in enumerate(split_data.columns):
+            df[f'Column_{i + 1}'] = split_data[col]  # Add each new split column
 
-    # Transform the DataFrame (date formatting, numerical conversions, etc.)
-    if 'DateUntil' in df.columns:
-        df['DateUntil'] = pd.to_datetime(df['DateUntil'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y')
-    if 'Despatch_Qty' in df.columns:
-        df['Despatch_Qty'] = pd.to_numeric(df['Despatch_Qty'], errors='coerce')
+        # Optionally drop the original first column if no longer needed
+        df = df.drop(df.columns[0], axis=1)
+
+        print("Updated DataFrame after splitting the first column:")
+        print(df)
+    else:
+        print("First column is empty. No splitting applied.")
+
+    # Now perform the rest of your data transformations on the DataFrame
+
+    last_week_date = (datetime.now() - timedelta(weeks=1)).strftime('%d/%m/%Y')
+
+    # For 'Delivery_Date', replace 'Backorder' with last week's date
     if 'Delivery_Date' in df.columns:
         df['Delivery_Date'] = df['Delivery_Date'].apply(
-            lambda x: safe_convert_calendar_week_to_date(x) if isinstance(x, str) and x.startswith('CW') else x)
+            lambda x: last_week_date if str(x).strip().lower() == 'backorder' else x
+        )
+
+    # If 'DateUntil' exists, convert to the correct format
+    if 'DateUntil' in df.columns:
+        df['DateUntil'] = pd.to_datetime(df['DateUntil'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y')
+    if 'Column_17' in df.columns:
+        df['Column_17'] = pd.to_datetime(df['Column_17'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y')
+    if 'Delivery_Date' in df.columns:
+        df['Release_Status'] = df['Delivery_Date'].apply(lambda x: 1 if is_in_previous_week(x) else 4)
+
+    if 'DateUntil' in df.columns:
+        df['Status'] = df['DateUntil'].apply(lambda x: 1 if is_in_previous_week(x) else 4)
+    # For 'Material', process as string with prefix 'V' and modify format
     if 'Material' in df.columns:
         df['Material'] = df['Material'].astype(str).apply(
             lambda x: 'V' + x.replace('-', '.')[0:7]
         )
-    if 'Status' in df.columns or 'Release_Status' in df.columns:
-        status_column = 'Status' if 'Status' in df.columns else 'Release_Status'
-        df[status_column] = df[status_column].apply(
-            lambda x: 4 if str(x).lower() in ['firm', 'forecast'] else (1 if str(x).lower() == 'backlog' else x)
-        )
 
-    # Transform the DataFrame
+    # Process 'Material Code or Part-Revision'
+    if 'Column_5' in df.columns:
+        df['Column_5'] = df['Column_5'].apply(
+            lambda x: re.match(r'\d+', str(x)).group(0) if pd.notnull(x) else ''
+        )
+    if 'Delivery_Date' in df.columns:
+        df['Delivery_Date'] = df['Delivery_Date'].apply(
+            lambda x: safe_convert_calendar_week_to_date(x) if isinstance(x, str) and x.startswith('CW') else x)
+    # Process status columns: Convert to numeric values (e.g., 'firm' -> 4, 'backlog' -> 1)
+    status_columns = ['Status', 'Release_Status', 'Column_12']
+    for status_column in status_columns:
+        if status_column in df.columns:
+            df[status_column] = df[status_column].apply(
+                lambda x: 4 if str(x).lower() in ['firm', 'forecast', 'on order']
+                else (1 if str(x).lower() == 'backlog' else x)
+            )
+
+    # Create the transformed DataFrame
+    num_rows = len(df)
     transformed_df = pd.DataFrame({
-        'TIERSLU': customer_code,
-        'Material_No_Customer': get_first_available_column(df, ['Material_No_Customer', 'Material']),
-        'Quantité': get_first_available_column(df, ['Despatch_Qty', 'DespatchQty']),
-        'LIVRFINLU': get_first_available_column(df, ['Delivery_Date', 'DateUntil']),
-        'Libelle client': customer_name.split(" C")[0],
-        'Statut': get_first_available_column(df, ['Release_Status', 'Status']),
-        'Tiers livré': customer_code,
-        'REFEXTERNELU': get_first_available_column(df, ['Purchase_Order_No', 'PONumber']),
-        'Date debut Validité': "20190101",
+        'TIERSLU': [customer_code] * num_rows,
+        'Material_No_Customer': get_first_available_column(df, ['Material_No_Customer', 'Material',
+                                                                'Column_5']),
+        'Quantité': get_first_available_column(df, ['Despatch_Qty', 'DespatchQty', 'Column_13']),
+        'LIVRFINLU': get_first_available_column(df, ['Delivery_Date', 'DateUntil', 'Column_17']),
+        'Libelle client': [customer_name.split(" C")[0]] * num_rows,
+        'Statut': get_first_available_column(df, ['Release_Status', 'Status', 'Column_12']),
+        'Tiers livré': [customer_code] * num_rows,
+        'REFEXTERNELU': get_first_available_column(df, ['Purchase_Order_No', 'PONumber', 'Column_3']),
+        'Date debut Validité': ['20190101'] * num_rows,
     })
 
-    # Remove '.0' from 'Quantité' column
+    # Remove '.0' from 'Quantité' column if it exists
     if 'Quantité' in transformed_df.columns:
         transformed_df['Quantité'] = transformed_df['Quantité'].apply(
-            lambda x: str(int(x)) if pd.notnull(x) and float(x).is_integer() else x
+            lambda x: str(int(float(x.replace('.', '').replace(',', '.')))) if pd.notnull(x) and isinstance(x,
+                                                                                                            str) and x.replace(
+                '.', '', 1).replace(',', '', 1).isdigit() else x
         )
 
     # Define the output file path
@@ -417,7 +527,6 @@ def process_csv(file, customer_code, customer_name):
     transformed_df.to_csv(output_path, index=False, sep=';')
 
     return transformed_df, output_filename
-
 
 @app.route('/')
 def index():
