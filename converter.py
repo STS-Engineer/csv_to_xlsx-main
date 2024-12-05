@@ -510,7 +510,7 @@ def process_csv(file, customer_code, customer_name):
         'Date debut Validité': ['20190101'] * num_rows,
     })
 
-    # Remove '.0' from 'Quantité' column if it exists
+
     if 'Quantité' in transformed_df.columns:
         transformed_df['Quantité'] = transformed_df['Quantité'].apply(
             lambda x: str(int(float(x.replace('.', '').replace(',', '.')))) if pd.notnull(x) and isinstance(x,
