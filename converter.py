@@ -481,7 +481,8 @@ def process_csv(file, customer_code, customer_name):
     # Process 'Material Code or Part-Revision'
     if 'Column_5' in df.columns:
         df['Column_5'] = df['Column_5'].apply(
-            lambda x: re.match(r'\d+', str(x)).group(0) if pd.notnull(x) else ''
+            lambda x: re.match(r'\d+', str(x)).group(0) if pd.notnull(x) and re.match(r'\d+', str(x)) else ''
+
         )
     if 'Delivery_Date' in df.columns:
         df['Delivery_Date'] = df['Delivery_Date'].apply(
