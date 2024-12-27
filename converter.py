@@ -441,10 +441,38 @@ def process_csv(file, customer_code, customer_name):
     if 'Delivery_Date' in df.columns:
         df['Delivery_Date'] = df['Delivery_Date'].apply(
             lambda x: safe_convert_calendar_week_to_date(x) if isinstance(x, str) and x.startswith('CW') else x)
-    if 'Material' in df.columns:
-        df['Material'] = df['Material'].astype(str).apply(
-            lambda x: 'V' + x.replace('-', '.')[0:7]
-        )
+    # Remove rows where 'Despatch_Qty' or 'DespatchQty' equals 0
+    # Delete rows where 'Despatch_Qty' or 'DespatchQty' equals 0
+    if 'Despatch_Qty' in df.columns or 'DespatchQty' in df.columns:
+        def clean_and_convert(value):
+            try:
+                # Remove all non-numeric characters except '.' and ','
+                cleaned = re.sub(r'[^\d.,]', '', str(value))
+                # If both '.' and ',' are present, assume European format (e.g., '3.780,00')
+                if '.' in cleaned and ',' in cleaned:
+                    cleaned = cleaned.replace('.', '').replace(',', '.')
+                elif ',' in cleaned:
+                    cleaned = cleaned.replace(',', '.')
+                return float(cleaned)
+            except (ValueError, TypeError):
+                return None
+
+        # Apply the cleaning and conversion function
+        if 'Despatch_Qty' in df.columns:
+            df['Despatch_Qty'] = df['Despatch_Qty'].apply(clean_and_convert)
+        if 'DespatchQty' in df.columns:
+            df['DespatchQty'] = df['DespatchQty'].apply(clean_and_convert)
+
+        # Remove rows where 'Despatch_Qty' or 'DespatchQty' equals 0 or conversion failed (None)
+        df = df[
+            ~(
+                (df['Despatch_Qty'] == 0) if 'Despatch_Qty' in df.columns else False
+            ) &
+            ~(
+                (df['DespatchQty'] == 0) if 'DespatchQty' in df.columns else False
+            )
+            ]
+
     if 'Status' in df.columns or 'Release_Status' in df.columns:
         status_column = 'Status' if 'Status' in df.columns else 'Release_Status'
         df[status_column] = df[status_column].apply(
