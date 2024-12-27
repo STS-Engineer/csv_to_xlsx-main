@@ -165,7 +165,6 @@ UPLOAD_FORM_HTML = """<!doctype html>
           <option value="VALEO ILUMINACION S.A.U C00125" data-code="C00125">VALEO ILUMINACION S.A.U C00125</option>
           <option value="VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072" data-code="C00072">VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072</option>
           <option value="NIDEC SPAIN MOTORS AND ACTUATORS C00050" data-code="C00050">NIDEC SPAIN MOTORS AND ACTUATORS C00050</option>
-          <option value="NIDEC SPAIN MOTORS AND ACTUATORS - New C00050-1" data-code="C00050-1">NIDEC SPAIN MOTORS AND ACTUATORS - New C00050-1</option>
           <option value="VALEO NORTH AMERICA INC.(WIPERS) C00303" data-code="C00303">VALEO NORTH AMERICA INC.(WIPERS) C00303</option>
           <option value="VALEO AUTOSYSTEMY SP Z.O.O C00250" data-code="C00250">VALEO AUTOSYSTEMY SP Z.O.O C00250</option>
           <option value="NIDEC MOTORS & ACTUATORS (GERMANY) GmbH C00113" data-code="C00113">NIDEC MOTORS & ACTUATORS (GERMANY) GmbH C00113</option>
@@ -502,9 +501,13 @@ def process_csv(file, customer_code, customer_name):
     # Remove '.0' from 'Quantité' column if it exists (for display purposes)
     if 'Quantité' in transformed_df.columns:
         transformed_df['Quantité'] = transformed_df['Quantité'].apply(
-            lambda x: str(int(float(x.replace('.', '').replace(',', '.')))) if pd.notnull(x) and isinstance(x,
-                                                                                                            str) and x.replace(
-                '.', '', 1).replace(',', '', 1).isdigit() else x
+            lambda x: str(int(float(str(x).replace(',', '.')))) if pd.notnull(x) and str(x).replace(',', '.').replace(
+                '.', '').isdigit() else x
+        )
+    if 'Statut' in transformed_df.columns:
+        transformed_df['Statut'] = transformed_df['Statut'].apply(
+            lambda x: str(int(float(str(x).replace(',', '.')))) if pd.notnull(x) and str(x).replace(',', '.').replace(
+                '.', '').isdigit() else x
         )
 
     # Define the output file path
