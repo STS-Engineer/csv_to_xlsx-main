@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          repository: STS-Engineer/csv_to_xlsx-main
+          ref: master
 
       - name: Set up Python version
         uses: actions/setup-python@v5
