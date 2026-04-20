@@ -13,19 +13,18 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      # Optional: run tests here
 
       - name: Create deployment zip
         run: |
@@ -48,6 +47,6 @@ jobs:
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'avo-csv-converter'
-          slot-name: 'Production'
+          app-name: "avo-csv-converter"
+          slot-name: "Production"
           package: release.zip
