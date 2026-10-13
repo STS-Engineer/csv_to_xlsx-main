@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 from PyPDF2 import PdfReader
 import re
 import logging
+import csv
+import io
+from c00250 import OUTPUT_COLUMNS, is_portal_csv, transform_portal_rows, encode_portal_csv
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
@@ -19,177 +22,7 @@ if not os.path.exists(OUTPUT_DIR):
 ALLOWED_EXTENSIONS = {'csv', 'pdf'}
 
 # HTML Template for Upload Form
-UPLOAD_FORM_HTML = """<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>CSV Transformer</title>
-    <style>
-      body {
-        font-family: 'Arial', sans-serif;
-        background-color: #f4f7f6;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-      }
-      .container {
-        background-color: #ffffff;
-        padding: 30px;
-        border-radius: 10px;
-        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        text-align: center;
-        width: 80%;
-        overflow: auto;
-        max-height: 90vh;
-      }
-      h1 {
-        color: #333;
-        font-size: 24px;
-        margin-bottom: 20px;
-      }
-      p {
-        font-size: 16px;
-        color: #555;
-        margin-bottom: 20px;
-      }
-      form {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 15px;
-      }
-      input[type="file"], input[type="text"], input[type="submit"], a.download-btn {
-        padding: 12px;
-        font-size: 16px;
-        border: 1px solid #ddd;
-        border-radius: 5px;
-        outline: none;
-        transition: all 0.3s ease-in-out;
-        width: 100%;
-        max-width: 400px;
-        margin: 0 auto;
-      }
-      input[type="file"], input[type="text"] {
-        background-color: #f8f9fa;
-      }
-      input[type="file"]:hover, input[type="text"]:hover {
-        background-color: #e9ecef;
-      }
-      input[type="submit"], a.download-btn {
-        background-color: #28a745;
-        color: white;
-        cursor: pointer;
-        border: none;
-      }
-      input[type="submit"]:hover, a.download-btn:hover {
-        background-color: #218838;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 20px;
-      }
-      table th, table td {
-        border: 1px solid #ddd;
-        padding: 8px;
-        text-align: left;
-      }
-      table th {
-        background-color: #28a745;
-        color: white;
-      }
-      table tbody tr:nth-child(odd) {
-        background-color: #f9f9f9;
-      }
-      table tbody tr:hover {
-        background-color: #e9ecef;
-      }
-      .scrollable {
-        overflow-x: auto;
-        margin-top: 20px;
-        max-height: 300px;
-      }
-      footer {
-        margin-top: 20px;
-        color: #888;
-        font-size: 14px;
-      }
-      img {
-        max-width: 300px;
-        margin-bottom: 20px;
-      }
-      select.select-btn {
-        appearance: none;
-        background-color: #007bff;
-        color: white;
-        font-size: 16px;
-        padding: 12px;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        text-align: center;
-        width: 100%;
-        max-width: 400px;
-        margin: 10px auto;
-      }
-      select.select-btn:hover {
-        background-color: #0056b3;
-      }
-    </style>
-    <script>
-      function updateCustomerCode() {
-        const customerDropdown = document.getElementById('customer_name');
-        const customerCodeInput = document.getElementById('customer_code');
-        const selectedOption = customerDropdown.options[customerDropdown.selectedIndex];
-        const customerCode = selectedOption.getAttribute('data-code');
-        customerCodeInput.value = customerCode ? customerCode : '';
-      }
-    </script>
-  </head>
-  <body>
-    <div class="container">
-    <img src="/static/logo-avocarbon (1).png" alt="Logo">
-      <h1>CSV Transformation Tool</h1>
-      <p>Upload your CSV file or PDF file and enter the customer code to transform your data.</p>
-      <form action="/convert" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept=".csv,.pdf" required>
-        <select name="customer_name" class="btn select-btn" id="customer_name" onchange="updateCustomerCode()" required>
-          <option value="" disabled selected>Select Customer Name</option>
-          <option value="INTEVA PRODUCTS, LLC C00241" data-code="C00241">INTEVA PRODUCTS, LLC C00241</option>
-          <option value="Inteva Esson C00410" data-code="C00410">Inteva Esson C00410</option>
-          <option value="VALEO NEVERS C00409" data-code="C00409">VALEO NEVERS C00409</option>
-          <option value="VALEO ILUMINACION S.A.U C00125" data-code="C00125">VALEO ILUMINACION S.A.U C00125</option>
-          <option value="VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072" data-code="C00072">VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072</option>
-          <option value="NIDEC SPAIN MOTORS AND ACTUATORS C00050" data-code="C00050">NIDEC SPAIN MOTORS AND ACTUATORS C00050</option>
-          <option value="VALEO NORTH AMERICA INC.(WIPERS) C00303" data-code="C00303">VALEO NORTH AMERICA INC.(WIPERS) C00303</option>
-          <option value="VALEO AUTOSYSTEMY SP Z.O.O C00250" data-code="C00250">VALEO AUTOSYSTEMY SP Z.O.O C00250</option>
-          <option value="NIDEC MOTORS & ACTUATORS (GERMANY) GmbH C00113" data-code="C00113">NIDEC MOTORS & ACTUATORS (GERMANY) GmbH C00113</option>
-          <option value="VALEO SHARED SERVICE CENTER C00132" data-code="C00132">VALEO SHARED SERVICE CENTER C00132</option>
-          <option value="NIDEC MOTORS & ACTUATORS (POLAND)Sp C00126" data-code="C00126">NIDEC MOTORS & ACTUATORS (POLAND)Sp C00126</option>
-        </select>
-        <input type="text" name="customer_code" id="customer_code" placeholder="Customer Code" readonly required>
-        <input type="submit" value="Transform">
-      </form>
-      {% if summary_table %}
-      <div class="scrollable">
-        <h2>Transformed Data Preview</h2>
-        <table>{{ summary_table|safe }}</table>
-      </div>
-      {% endif %}
-      {% if show_download %}
-      <a href="/download/{{ download_path }}" class="btn download-btn">Download Transformed CSV</a>
-      {% endif %}
-      <footer>
-        &copy; 2024 CSV Transformation Tool. All rights reserved. powered by STS
-      </footer>
-    </div>
-  </body>
-</html>
-"""
+UPLOAD_FORM_HTML = "{% include 'upload.html' %}"
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -475,6 +308,27 @@ def is_old_week(date_str):
 
 def process_csv(file, customer_code, customer_name):
     encoding = detect_encoding(file)
+    # Read the portal schema separately so identifiers keep leading zeroes and
+    # malformed business rows are never silently skipped. Legacy paths below
+    # retain their original parsing and output behavior.
+    if customer_code == "C00250":
+        text = file.read().decode(encoding or "utf-8-sig").lstrip("\ufeff")
+        file.seek(0)
+        reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=";", strict=True)
+        if is_portal_csv(reader.fieldnames or [], customer_code):
+            rows = []
+            for number, row in enumerate(reader, start=2):
+                if None in row or any(value is None for value in row.values()):
+                    raise ValueError(f"C00250 row {number}: inconsistent column count")
+                rows.append(row)
+            transformed_rows = transform_portal_rows(rows, customer_name)
+            output_filename = secure_filename(f"{customer_code}.csv")
+            output_path = os.path.join(OUTPUT_DIR, output_filename)
+            output_bytes = encode_portal_csv(transformed_rows)
+            with open(output_path, "wb") as output_file:
+                output_file.write(output_bytes)
+            return pd.DataFrame(transformed_rows, columns=OUTPUT_COLUMNS), output_filename
+
     df = pd.read_csv(file, delimiter=';', encoding=encoding, on_bad_lines='skip')
 
     # Remove rows where specific column values match their corresponding headers
@@ -600,13 +454,17 @@ def convert():
         else:
             return "Invalid file type. Please upload a CSV or PDF file.", 400
 
-        transformed_table_html = transformed_data.head(20).to_html(classes='table', index=False)
+        transformed_table_html = transformed_data.head(20).to_html(classes='table', index=False, escape=True)
 
         return render_template_string(
             UPLOAD_FORM_HTML,
             summary_table=transformed_table_html,
             show_download=True,
-            download_path=output_filename
+            download_path=output_filename,
+            source_filename=file.filename,
+            customer_name=customer_name,
+            customer_code=customer_code,
+            row_count=len(transformed_data)
         )
     except Exception as e:
         return f"Error processing the file: {e}", 500
