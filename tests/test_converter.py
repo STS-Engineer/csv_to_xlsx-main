@@ -1,4 +1,5 @@
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,6 +36,32 @@ class RouteTests(unittest.TestCase):
         self.assertIn(b"000001;168;19/10/2099", download.data)
         self.assertIn(b";00001234;20190101\r\n", download.data)
         self.assertIn("Quantité".encode("cp1252"), download.data)
+
+    def test_download_uses_conversion_directory_when_cwd_differs(self):
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(self.temp.name)
+            Path("outputs").mkdir()
+            with patch.object(converter, "OUTPUT_DIR", "outputs"):
+                response = self.post(
+                    b"Item Number;Quantity;Delivery Date;PO Number;Requirement type\n"
+                    b"TEST-A;168;19/10/2099;00001234;Forecast\n"
+                )
+                self.assertEqual(response.status_code, 200)
+                expected = Path("outputs/C00250.csv").read_bytes()
+                download = self.client.get("/download/C00250.csv")
+                self.addCleanup(download.close)
+                self.assertEqual(download.status_code, 200)
+                self.assertEqual(download.data, expected)
+                self.assertIn("attachment; filename=C00250.csv",
+                              download.headers["Content-Disposition"])
+                self.assertEqual(download.mimetype, "text/csv")
+        finally:
+            os.chdir(original_cwd)
+
+    def test_missing_download_still_returns_not_found(self):
+        response = self.client.get("/download/missing.csv")
+        self.assertEqual(response.status_code, 404)
 
     def test_portal_malformed_row_is_rejected(self):
         response = self.post(
