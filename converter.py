@@ -472,7 +472,10 @@ def convert():
 
 @app.route('/download/<filename>')
 def download(filename):
-    file_path = os.path.join(OUTPUT_DIR, filename)
+    # Conversion writes relative to the process working directory. Flask
+    # resolves relative send_file paths against app.root_path instead, which
+    # can differ under Gunicorn/Azure. Resolve once so both use the same file.
+    file_path = os.path.abspath(os.path.join(OUTPUT_DIR, filename))
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
     return "File not found", 404
