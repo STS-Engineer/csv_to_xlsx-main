@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Converter · AVOCarbon</title>
+  <link rel="icon" href="{{ url_for('static', filename='logo-avocarbon-carre.ico') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='converter.css') }}">
+  <script src="{{ url_for('static', filename='converter.js') }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to converter</a>
+  <header class="site-header">
+    <a class="brand" href="{{ url_for('index') }}" aria-label="AVOCarbon converter home"><img src="{{ url_for('static', filename='logo-avocarbon (1).png') }}" alt="AVOCarbon Group" width="215" height="40"></a>
+    <span class="header-label">OPERATIONS <span aria-hidden="true">/</span> DATA TOOLS</span>
+  </header>
+  <main id="main" class="workspace">
+    <section class="intro" aria-labelledby="page-title">
+      <span class="eyebrow">CUSTOMER DATA CONVERSION</span>
+      <h1 id="page-title">From source file<br>to ready-to-use data.</h1>
+      <p>Transform customer CSV and PDF files into a consistent CSV format. Select a customer, upload your file, and review the result.</p>
+    </section>
+    <div class="work-grid">
+      <section class="converter-card" aria-labelledby="upload-title">
+        <div class="card-heading"><span class="step-mark" aria-hidden="true">01</span><div><h2 id="upload-title">Prepare your conversion</h2><p>Choose the customer that matches your source file.</p></div></div>
+        <form id="convert-form" action="{{ url_for('convert') }}" method="post" enctype="multipart/form-data">
+          <div class="customer-fields">
+            <div class="field customer-field">
+              <label for="customer_name">Customer <span class="required">(required)</span></label>
+              <select name="customer_name" id="customer_name" required>
+                <option value="" disabled {% if not customer_code %}selected{% endif %}>Select a customer</option>
+                <option value="INTEVA PRODUCTS, LLC C00241" data-code="C00241" {% if customer_code == "C00241" %}selected{% endif %}>INTEVA PRODUCTS, LLC C00241</option>
+                <option value="Inteva Esson C00410" data-code="C00410" {% if customer_code == "C00410" %}selected{% endif %}>Inteva Esson C00410</option>
+                <option value="VALEO NEVERS C00409" data-code="C00409" {% if customer_code == "C00409" %}selected{% endif %}>VALEO NEVERS C00409</option>
+                <option value="VALEO ILUMINACION S.A.U C00125" data-code="C00125" {% if customer_code == "C00125" %}selected{% endif %}>VALEO ILUMINACION S.A.U C00125</option>
+                <option value="VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072" data-code="C00072" {% if customer_code == "C00072" %}selected{% endif %}>VALEO SISTEMAS AUTOMOTIVOS BRESIL C00072</option>
+                <option value="NIDEC SPAIN MOTORS AND ACTUATORS C00050" data-code="C00050" {% if customer_code == "C00050" %}selected{% endif %}>NIDEC SPAIN MOTORS AND ACTUATORS C00050</option>
+                <option value="VALEO NORTH AMERICA INC.(WIPERS) C00303" data-code="C00303" {% if customer_code == "C00303" %}selected{% endif %}>VALEO NORTH AMERICA INC.(WIPERS) C00303</option>
+                <option value="VALEO AUTOSYSTEMY SP Z.O.O C00250" data-code="C00250" {% if customer_code == "C00250" %}selected{% endif %}>VALEO AUTOSYSTEMY SP Z.O.O C00250</option>
+                <option value="NIDEC MOTORS &amp; ACTUATORS (GERMANY) GmbH C00113" data-code="C00113" {% if customer_code == "C00113" %}selected{% endif %}>NIDEC MOTORS &amp; ACTUATORS (GERMANY) GmbH C00113</option>
+                <option value="VALEO SHARED SERVICE CENTER C00132" data-code="C00132" {% if customer_code == "C00132" %}selected{% endif %}>VALEO SHARED SERVICE CENTER C00132</option>
+                <option value="NIDEC MOTORS &amp; ACTUATORS (POLAND)Sp C00126" data-code="C00126" {% if customer_code == "C00126" %}selected{% endif %}>NIDEC MOTORS &amp; ACTUATORS (POLAND)Sp C00126</option>
+              </select>
+            </div>
+            <div class="field code-field"><label for="customer_code">Customer code</label><input type="text" name="customer_code" id="customer_code" value="{{ customer_code|default('') }}" placeholder="Auto-filled" readonly required aria-describedby="code-help"></div>
+          </div>
+          <p id="code-help" class="field-hint">The customer code is filled in automatically.</p>
+          <label class="file-label" for="source-file">Source file <span class="required">(required)</span></label>
+          <div id="drop-zone" class="drop-zone">
+            <svg class="upload-icon" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></svg>
+            <span class="drop-title">Drop your file here</span>
+            <span class="drop-copy">or choose a file from your device</span>
+            <input id="source-file" type="file" name="file" accept=".csv,.pdf" required aria-describedby="file-help file-status file-error">
+            <span id="file-help" class="field-hint">CSV or PDF · One file per conversion</span>
+          </div>
+          <p id="file-status" class="file-status" role="status" aria-live="polite">No file selected</p>
+          <p id="file-error" class="file-error" role="alert" hidden></p>
+          <div class="form-actions"><span id="processing-status" class="field-hint" role="status" aria-live="polite">Ready when you are.</span><button id="convert-button" class="button button-primary" type="submit"><span class="spinner" aria-hidden="true" hidden></span><span id="button-label">Convert file</span><span class="button-arrow" aria-hidden="true">→</span></button></div>
+        </form>
+      </section>
+      <aside class="guide-card" aria-labelledby="guide-title">
+        <span class="eyebrow">A SIMPLE WORKFLOW</span><h2 id="guide-title">Three steps.<br>One consistent format.</h2>
+        <ol class="workflow"><li><span class="workflow-number">1</span><div><h3>Select & upload</h3><p>Choose the customer and the original CSV or PDF file.</p></div></li><li><span class="workflow-number">2</span><div><h3>Review your data</h3><p>Check the first 20 rows in the preview after conversion.</p></div></li><li><span class="workflow-number">3</span><div><h3>Download the CSV</h3><p>Save the transformed file for your next step.</p></div></li></ol>
+        <div class="guide-note"><span aria-hidden="true">↳</span><p>Working with C00250?<br><strong>Select VALEO AUTOSYSTEMY SP Z.O.O.</strong></p></div>
+      </aside>
+    </div>
+    {% if show_download %}
+    <section class="results-card" aria-labelledby="result-title">
+      <div class="results-heading"><div><span class="eyebrow success-label">CONVERSION COMPLETE</span><h2 id="result-title">Your file is ready.</h2>{% if source_filename %}<p class="source-name">Source: {{ source_filename }}</p>{% endif %}</div><a class="button button-primary" href="{{ url_for('download', filename=download_path) }}" download><span aria-hidden="true">↓</span> Download transformed CSV</a></div>
+      {% if summary_table %}<div class="preview-heading"><h3>Data preview</h3><span>First 20 rows · Scroll to see all columns</span></div><div class="table-scroll" role="region" aria-label="Transformed data preview" tabindex="0">{{ summary_table|safe }}</div>{% endif %}
+    </section>
+    {% endif %}
+    <footer><span>AVOCarbon <span aria-hidden="true">·</span> Data Converter</span><span>Powered by STS</span></footer>
+  </main>
+</body>
+</html>
